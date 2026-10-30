@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>우리 둘만의 집 · 부부 다이어리</title>
+  <meta name="theme-color" content="#e05d44">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="우리둘집">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- 상단: 남편(Android) / 아내(iPhone) 시점 전환 및 실시간 동기화 상태 -->
+    <header class="top-bar">
+      <div class="role-switch" role="tablist" aria-label="내 역할 선택">
+        <button type="button" class="role-btn is-active" data-role="husband">🤖 남편 (Android)</button>
+        <button type="button" class="role-btn" data-role="wife">🍎 아내 (iPhone)</button>
+      </div>
+      <div class="top-actions">
+        <span class="sync-pill" id="syncStatus"><span class="sync-dot"></span><span id="syncText">로컬 저장됨</span></span>
+        <button type="button" class="icon-btn" id="themeBtn" title="다크모드 전환" aria-label="다크모드 전환">🌙</button>
+      </div>
+    </header>
+
+    <!-- 상단 고정 부부 상태 배너 -->
+    <section class="hero-card" id="heroSection"></section>
+
+    <!-- 알림 토스트 (콕 찌르기 / 쿠폰 호출 / 저녁 주문) -->
+    <div id="alertSlot"></div>
+
+    <!-- 탭별 메인 컨텐츠 -->
+    <main id="mainView" style="display:grid;gap:14px;"></main>
+  </div>
+
+  <!-- 하단 6탭 네비게이션 -->
+  <nav class="bottom-nav" aria-label="하단 메뉴">
+    <div class="bottom-nav-inner">
+      <button type="button" class="nav-tab is-active" data-tab="home">
+        <span class="ico">🏠</span><span class="lbl">홈·문답</span>
+      </button>
+      <button type="button" class="nav-tab" data-tab="todo">
+        <span class="ico">🛒</span><span class="lbl">장보기</span>
+      </button>
+      <button type="button" class="nav-tab" data-tab="cat">
+        <span class="ico">🐱</span><span class="lbl">우리냥이</span>
+      </button>
+      <button type="button" class="nav-tab" data-tab="coupon">
+        <span class="ico">🎟️</span><span class="lbl">쿠폰</span>
+      </button>
+      <button type="button" class="nav-tab" data-tab="dinner">
+        <span class="ico">🍽️</span><span class="lbl">뭐먹지</span>
+      </button>
+      <button type="button" class="nav-tab" data-tab="wiki">
+        <span class="ico">🗺️</span><span class="lbl">추억·도감</span>
+      </button>
+    </div>
+  </nav>
+
+  <script src="./app.js"></script>
+</body>
+</html>
+

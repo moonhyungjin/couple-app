@@ -1,0 +1,19 @@
+{
+  "name": "우리 둘만의 집 · 부부 다이어리",
+  "short_name": "우리둘집",
+  "description": "남편(Android)과 아내(iPhone) 둘만 쓰는 프라이빗 부부 생활·감성 웹앱",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#fdf8f5",
+  "theme_color": "#e06d53",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
