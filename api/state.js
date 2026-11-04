@@ -8,101 +8,11 @@ const BUCKET_ID = "couple-app-state";
 const OBJECT_PATH = "state.json";
 const ROOM_CODE = "our-secret-home-2026";
 
-function resolveSupabaseCredentials() {
-  const env = process.env || {};
-  const keys = Object.keys(env);
-
-  // 1) Supabase URL 찾기 (명시적 변수명 -> 값에 .supabase.co 포함된 변수 -> POSTGRES_URL에서 추출)
-  let url =
-    env.SUPABASE_URL ||
-    env.NEXT_PUBLIC_SUPABASE_URL ||
-    env.STORAGE_SUPABASE_URL ||
-    env.STORAGE_NEXT_PUBLIC_SUPABASE_URL ||
-    env.STORAGE_URL ||
-    "";
-
-  if (!url) {
-    for (const k of keys) {
-      const val = String(env[k] || "").trim();
-      if (/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(val)) {
-        url = val;
-        break;
-      }
-    }
-  }
-
-  if (!url) {
-    // POSTGRES_URL 등에서 project ref 추출 (예: postgres.xxxx:password@... 또는 db.xxxx.supabase.co)
-    for (const k of keys) {
-      const val = String(env[k] || "");
-      const m1 = val.match(/postgres\.([a-z0-9]{15,25}):/i);
-      const m2 = val.match(/db\.([a-z0-9]{15,25})\.supabase\.co/i);
-      const ref = (m1 && m1[1]) || (m2 && m2[1]);
-      if (ref) {
-        url = `https://${ref}.supabase.co`;
-        break;
-      }
-    }
-  }
-
-  // 2) Service Role Key 우선, 없으면 Anon Key 찾기
-  let key =
-    env.SUPABASE_SERVICE_ROLE_KEY ||
-    env.STORAGE_SUPABASE_SERVICE_ROLE_KEY ||
-    env.STORAGE_SERVICE_ROLE_KEY ||
-    "";
-
-  if (!key) {
-    for (const k of keys) {
-      if (
-        (k.endsWith("SERVICE_ROLE_KEY") || k.endsWith("SECRET_KEY")) &&
-        env[k]
-      ) {
-        key = env[k];
-        break;
-      }
-    }
-  }
-
-  if (!key) {
-    key =
-      env.SUPABASE_ANON_KEY ||
-      env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      env.STORAGE_SUPABASE_ANON_KEY ||
-      env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      env.STORAGE_ANON_KEY ||
-      "";
-  }
-
-  if (!key) {
-    for (const k of keys) {
-      if (
-        (k.endsWith("ANON_KEY") || k.endsWith("PUBLISHABLE_KEY")) &&
-        env[k]
-      ) {
-        key = env[k];
-        break;
-      }
-    }
-  }
-
-  return {
-    url: String(url || "").replace(/\/+$/, ""),
-    key: String(key || "").trim()
-  };
-}
-
-function authHeaders(key, extra) {
-  return Object.assign(
-    {
-      apikey: key,
-      Authorization: `Bearer ${key}`
-    },
-    extra || {}
-  );
-}
+const { resolveSupabaseCredentials, authHeaders } = require("./_supabase");
 
 async function readStateFromSupabase(url, key) {
+  let lastError = null;
+
   // A. Storage 버킷에서 먼저 조회
   try {
     const storageRes = await fetch(
@@ -115,8 +25,16 @@ async function readStateFromSupabase(url, key) {
     if (storageRes.ok) {
       const data = await storageRes.json();
       if (data && typeof data === "object") return data;
+    } else {
+      const text = await storageRes.text().catch(() => "");
+      const notFound =
+        storageRes.status === 404 ||
+        (storageRes.status === 400 && /not.?found|404/i.test(text));
+      if (!notFound) lastError = new Error(`storage read ${storageRes.status}: ${text}`);
     }
-  } catch (_) {}
+  } catch (err) {
+    lastError = err;
+  }
 
   // B. couple_room 테이블에서 조회 (폴백)
   try {
@@ -129,12 +47,13 @@ async function readStateFromSupabase(url, key) {
     );
     if (restRes.ok) {
       const rows = await restRes.json();
-      if (Array.isArray(rows) && rows[0] && rows[0].state) {
+      if (Array.isArray(rows) && rows[0] && rows[0].state && rows[0].state.updatedAt) {
         return rows[0].state;
       }
     }
   } catch (_) {}
 
+  if (lastError) throw lastError;
   return {};
 }
 
@@ -159,7 +78,9 @@ async function writeStateToSupabase(url, key, stateObj) {
     method: "POST",
     headers: authHeaders(key, {
       "Content-Type": "application/json",
-      "x-upsert": "true"
+      "x-upsert": "true",
+      // CDN에 캐시되면 배우자 폰이 옛날 데이터를 받아갈 수 있으므로 캐시 끔
+      "Cache-Control": "no-cache"
     }),
     body: payload
   });

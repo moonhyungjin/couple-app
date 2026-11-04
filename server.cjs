@@ -15,6 +15,7 @@ const PORT = Number(process.env.PORT || 4173);
 const ROOT_DIR = __dirname;
 const DATA_DIR = path.join(ROOT_DIR, "data");
 const STATE_FILE = path.join(DATA_DIR, "couple-state.json");
+const PHOTO_DIR = path.join(DATA_DIR, "photos");
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -125,7 +126,49 @@ const server = http.createServer(function (req, res) {
     return;
   }
 
-  // 4) 정적 파일 서빙
+  // 4) 추억 사진 저장/조회 (/api/photo?id=...) — data/photos/<id>.jpg
+  if (pathname === "/api/photo") {
+    const id = String(parsedUrl.searchParams.get("id") || "");
+    if (!/^[a-zA-Z0-9_-]{4,80}$/.test(id)) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: "invalid id" }));
+      return;
+    }
+    const photoPath = path.join(PHOTO_DIR, id + ".jpg");
+
+    if (req.method === "GET") {
+      if (!fs.existsSync(photoPath)) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "public, max-age=31536000, immutable"
+      });
+      fs.createReadStream(photoPath).pipe(res);
+      return;
+    }
+
+    if (req.method === "POST") {
+      const chunks = [];
+      let size = 0;
+      req.on("data", function (chunk) {
+        size += chunk.length;
+        if (size > 8 * 1024 * 1024) req.destroy();
+        else chunks.push(chunk);
+      });
+      req.on("end", function () {
+        fs.mkdirSync(PHOTO_DIR, { recursive: true });
+        fs.writeFileSync(photoPath, Buffer.concat(chunks));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, url: `/api/photo?id=${id}` }));
+      });
+      return;
+    }
+  }
+
+  // 5) 정적 파일 서빙
   let relPath = pathname === "/" ? "/index.html" : pathname;
   relPath = path.normalize(relPath).replace(/^(\.\.[/\\])+/, "");
   const filePath = path.join(ROOT_DIR, relPath);

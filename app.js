@@ -277,9 +277,12 @@
 
   function createInitialState() {
     return {
-      updatedAt: Date.now(),
+      // 0 = 아직 서버와 맞춘 적 없는 샘플 데이터 (서버 데이터를 항상 우선)
+      updatedAt: 0,
       couple: {
         husbandName: "여보(남편)",
+        husbandPhoto: "",
+        wifePhoto: "",
         wifeName: "자기(아내)",
         startDate: "2021-05-22",
         anniversaryTitle: "결혼기념일"
@@ -425,6 +428,7 @@
   let state = loadState();
   let currentRole = localStorage.getItem(ROLE_KEY) || "husband";
   let currentTab = "home";
+  let questView = "todo"; // 퀘스트 탭 안: "todo"(할일) | "coupon"(쿠폰)
   let todoFilter = "전체";
   let dinnerFilter = "전체";
   let showCoupleSettings = false;
@@ -529,18 +533,119 @@
     }
   }
 
-  function applyRemoteState(incoming) {
-    if (!incoming || !incoming.updatedAt) return false;
-    if (incoming.updatedAt <= (state.updatedAt || 0)) return false;
-    const merged = Object.assign(createInitialState(), incoming);
+  // =========================================================================
+  // 서버 동기화 (남편 폰 ↔ 아내 폰)
+  // 서버와 마지막으로 맞춘 상태(syncedBase)를 기준으로 3-way 병합해서
+  // 둘이 동시에 바꿔도 서로의 변경이 지워지지 않게 합니다.
+  // =========================================================================
+  const DIRTY_KEY = "couple_app_dirty_v1";
+  const MAX_PAYLOAD_BYTES = 4.2 * 1024 * 1024; // Vercel 요청 본문 한도(4.5MB) 여유분
+  let syncedBase = null;
+  let syncInFlight = false;
+  let syncQueued = false;
+
+  function isPlainObject(v) {
+    return v !== null && typeof v === "object" && !Array.isArray(v);
+  }
+
+  function deepEqual(a, b) {
+    if (a === b) return true;
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b) || a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+      return true;
+    }
+    if (isPlainObject(a) && isPlainObject(b)) {
+      const ka = Object.keys(a).filter((k) => a[k] !== undefined);
+      const kb = Object.keys(b).filter((k) => b[k] !== undefined);
+      if (ka.length !== kb.length) return false;
+      for (const k of ka) if (!deepEqual(a[k], b[k])) return false;
+      return true;
+    }
+    return false;
+  }
+
+  function isIdList(arr) {
+    return Array.isArray(arr) && arr.every((x) => isPlainObject(x) && x.id != null);
+  }
+
+  // base: 마지막 동기화 상태, local: 내 폰, remote: 서버(배우자 폰)
+  function merge3(base, local, remote) {
+    if (deepEqual(local, remote)) return local;
+    if (deepEqual(local, base)) return remote;
+    if (deepEqual(remote, base)) return local;
+
+    if (isPlainObject(local) && isPlainObject(remote)) {
+      const b = isPlainObject(base) ? base : {};
+      const out = {};
+      const keys = new Set(Object.keys(local).concat(Object.keys(remote)));
+      keys.forEach(function (k) {
+        const v = merge3(b[k], local[k], remote[k]);
+        if (v !== undefined) out[k] = v;
+      });
+      return out;
+    }
+
+    if (isIdList(local) && isIdList(remote) && (base === undefined || isIdList(base))) {
+      const byId = (arr) => new Map((arr || []).map((x) => [String(x.id), x]));
+      const bMap = byId(base);
+      const lMap = byId(local);
+      const rMap = byId(remote);
+      const order = local.map((x) => String(x.id));
+      remote.forEach(function (x, idx) {
+        const id = String(x.id);
+        if (!lMap.has(id) && !bMap.has(id)) {
+          // 배우자가 새로 추가한 항목: 서버에서의 위치 근처에 끼워 넣기
+          order.splice(Math.min(idx, order.length), 0, id);
+        } else if (!lMap.has(id)) {
+          order.push(id); // 내가 지운 항목일 수 있음 → 아래 merge3가 판단
+        }
+      });
+      const out = [];
+      const seen = new Set();
+      order.forEach(function (id) {
+        if (seen.has(id)) return;
+        seen.add(id);
+        const v = merge3(bMap.get(id), lMap.get(id), rMap.get(id));
+        if (v !== undefined) out.push(v);
+      });
+      return out;
+    }
+
+    // 같은 값을 둘 다 바꾼 경우: 지금 이 폰에서 바꾼 값을 우선
+    return local === undefined ? remote : local;
+  }
+
+  function normalizeState(raw) {
+    const merged = Object.assign(createInitialState(), raw || {});
     merged.memories = normalizeMemories(merged.memories);
-    merged.cat = Object.assign(createDefaultCatState(), incoming.cat || {});
-    state = merged;
+    merged.cat = Object.assign(createDefaultCatState(), (raw && raw.cat) || {});
+    return merged;
+  }
+
+  function cloneJson(v) {
+    return JSON.parse(JSON.stringify(v));
+  }
+
+  function setDirty(flag) {
+    try {
+      if (flag) localStorage.setItem(DIRTY_KEY, "1");
+      else localStorage.removeItem(DIRTY_KEY);
+    } catch (_) {}
+  }
+
+  function isDirty() {
+    try {
+      return localStorage.getItem(DIRTY_KEY) === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function persistLocal() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (_) {}
-    renderAll();
-    return true;
   }
 
   function isUserTyping() {
@@ -550,18 +655,88 @@
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
   }
 
-  async function pullStateFromServer() {
-    try {
-      const res = await fetch("/api/state", { cache: "no-store" });
-      if (!res.ok) return false;
-      const remote = await res.json();
-      if (remote && remote.updatedAt) {
-        applyRemoteState(remote);
-      }
-      return true;
-    } catch (_) {
-      return false;
+  async function fetchRemoteState() {
+    const res = await fetch("/api/state?t=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("GET /api/state " + res.status);
+    const data = await res.json();
+    return data && typeof data === "object" && data.updatedAt ? data : null;
+  }
+
+  async function syncWithServer(options) {
+    const opts = options || {};
+    if (location.protocol === "file:") return;
+    if (syncInFlight) {
+      syncQueued = true;
+      return;
     }
+    syncInFlight = true;
+    try {
+      const remoteRaw = await fetchRemoteState();
+      const localSnap = cloneJson(state);
+      const remote = remoteRaw ? normalizeState(remoteRaw) : null;
+      let merged;
+
+      if (!remote) {
+        // 서버가 비어 있음 → 이 폰 데이터로 처음 채우기
+        merged = localSnap;
+        if (!merged.updatedAt) merged.updatedAt = Date.now();
+      } else if (!syncedBase && !isDirty()) {
+        // 이 폰에 아직 안 보낸 변경이 없음 → 서버 데이터를 그대로 사용
+        merged = remote;
+      } else {
+        // syncedBase가 없으면(앱 재시작 직후 미전송 변경) 합집합 방식으로 병합
+        merged = merge3(syncedBase || undefined, localSnap, remote);
+        merged.updatedAt = Math.max(remote.updatedAt || 0, localSnap.updatedAt || 0);
+      }
+
+      if (!remote || !deepEqual(merged, remote)) {
+        const body = JSON.stringify(merged);
+        if (body.length > MAX_PAYLOAD_BYTES) {
+          throw Object.assign(new Error("payload too large"), { code: "TOO_LARGE" });
+        }
+        const res = await fetch("/api/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body
+        });
+        if (!res.ok) throw new Error("POST /api/state " + res.status);
+      }
+
+      if (!deepEqual(state, localSnap)) {
+        // 요청 중에 사용자가 또 바꿨다면 그 변경도 살려서 한 번 더 동기화
+        state = normalizeState(merge3(localSnap, state, merged));
+        syncQueued = true;
+      } else {
+        state = merged;
+        setDirty(false);
+      }
+      syncedBase = cloneJson(merged);
+      persistLocal();
+      if (!deepEqual(localSnap, state) && (opts.forceRender || !isUserTyping())) {
+        renderAll();
+      }
+      serverConnected = true;
+      updateSyncPill("실시간 동기화 중", true);
+    } catch (err) {
+      if (err && err.code === "TOO_LARGE") {
+        updateSyncPill("사진 용량 초과 · 동기화 멈춤", false);
+      } else {
+        updateSyncPill("동기화 실패 · 재시도 중", false);
+      }
+    } finally {
+      syncInFlight = false;
+      if (syncQueued) {
+        syncQueued = false;
+        setTimeout(function () {
+          syncWithServer({ forceRender: true });
+        }, 300);
+      }
+    }
+  }
+
+  function pushStateToServer() {
+    setDirty(true);
+    return syncWithServer({ forceRender: true });
   }
 
   async function initRealtimeSync() {
@@ -569,69 +744,37 @@
       updateSyncPill("로컬 저장됨", false);
       return;
     }
-    try {
-      const res = await fetch("/api/state", { cache: "no-store" });
-      if (!res.ok) throw new Error("No backend");
-      const remote = await res.json();
-      if (remote && remote.updatedAt) {
-        if (remote.updatedAt > (state.updatedAt || 0)) {
-          applyRemoteState(remote);
-        }
-      } else {
-        await pushStateToServer();
-      }
-      serverConnected = true;
-      updateSyncPill("실시간 동기화 중", true);
+    await syncWithServer({ forceRender: true });
+    migrateInlinePhotos();
 
-      // 1) 클라우드(Vercel) 및 모바일 환경 대응: 주기적 동기화 + 화면 복귀 시 즉시 동기화
-      setInterval(function () {
-        if (document.hidden || isUserTyping()) return;
-        pullStateFromServer();
-      }, 4000);
+    // 주기적 동기화 + 화면 복귀 시 즉시 동기화
+    setInterval(function () {
+      if (document.hidden || isUserTyping()) return;
+      syncWithServer();
+    }, 4000);
 
-      document.addEventListener("visibilitychange", function () {
-        if (!document.hidden) {
-          pullStateFromServer();
-        }
-      });
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) syncWithServer({ forceRender: true });
+    });
 
-      // 2) 로컬 Node 서버(server.cjs) 환경일 때는 SSE 스트림도 함께 연결
-      const isLocalHost =
-        location.hostname === "localhost" ||
-        location.hostname === "127.0.0.1" ||
-        /^192\.168\.|^10\.|^172\./.test(location.hostname);
+    // 로컬 Node 서버(server.cjs)일 때는 SSE로 변경 즉시 감지
+    const isLocalHost =
+      location.hostname === "localhost" ||
+      location.hostname === "127.0.0.1" ||
+      /^192\.168\.|^10\.|^172\./.test(location.hostname);
 
-      if (isLocalHost && typeof EventSource !== "undefined") {
-        const es = new EventSource("/api/stream");
-        es.onmessage = function (ev) {
-          try {
-            const incoming = JSON.parse(ev.data);
-            if (!isUserTyping()) {
-              applyRemoteState(incoming);
-            }
-          } catch (_) {}
-        };
-      }
-    } catch (_) {
-      updateSyncPill("로컬 저장됨", false);
+    if (isLocalHost && typeof EventSource !== "undefined") {
+      const es = new EventSource("/api/stream");
+      es.onmessage = function () {
+        if (!isUserTyping()) syncWithServer();
+      };
     }
-  }
-
-  async function pushStateToServer() {
-    if (!serverConnected && location.protocol === "file:") return;
-    try {
-      await fetch("/api/state", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(state)
-      });
-    } catch (_) {}
   }
 
   window.addEventListener("storage", function (e) {
     if (e.key === STORAGE_KEY && e.newValue) {
       try {
-        state = Object.assign(createInitialState(), JSON.parse(e.newValue));
+        state = normalizeState(JSON.parse(e.newValue));
         renderAll();
       } catch (_) {}
     }
@@ -792,10 +935,62 @@
     }
   }
 
+  // 프로필 사진(없으면 🤖/🍎 이모지 동그라미)
+  function avatarHtml(role, size) {
+    const photo = state.couple[role + "Photo"];
+    const px = size || 32;
+    const style = `width:${px}px;height:${px}px;font-size:${Math.round(px * 0.55)}px;`;
+    if (photo) {
+      return `<img class="avatar" src="${escapeHtml(photo)}" alt="${escapeHtml(roleLabel(role))} 프로필" style="${style}">`;
+    }
+    return `<span class="avatar avatar-emoji" style="${style}">${role === "husband" ? "🤖" : "🍎"}</span>`;
+  }
+
+  // 누르면 사진을 고를 수 있는 아바타
+  function avatarPickerHtml(role, size) {
+    return `
+      <label class="avatar-picker" title="${escapeHtml(roleLabel(role))} 프로필 사진 바꾸기">
+        ${avatarHtml(role, size)}
+        <span class="avatar-cam">📷</span>
+        <input type="file" accept="image/*" data-avatar-input="${role}" style="display:none;">
+      </label>`;
+  }
+
+  // 사진 가운데를 정사각형으로 잘라 작게 압축
+  function compressAvatarFile(file) {
+    return new Promise(function (resolve) {
+      if (!file) return resolve("");
+      const reader = new FileReader();
+      reader.onload = function (ev) {
+        const img = new Image();
+        img.onload = function () {
+          const side = Math.min(img.width, img.height);
+          const out = 320;
+          const canvas = document.createElement("canvas");
+          canvas.width = out;
+          canvas.height = out;
+          canvas
+            .getContext("2d")
+            .drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, out, out);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
+        };
+        img.onerror = function () {
+          resolve("");
+        };
+        img.src = ev.target.result;
+      };
+      reader.onerror = function () {
+        resolve("");
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   function renderRoleBar() {
     document.querySelectorAll(".role-btn").forEach(function (btn) {
       const role = btn.getAttribute("data-role");
       btn.classList.toggle("is-active", role === currentRole);
+      btn.innerHTML = `${avatarHtml(role, 20)}<span>${role === "husband" ? "남편 (Android)" : "아내 (iPhone)"}</span>`;
     });
   }
 
@@ -828,6 +1023,10 @@
         showCoupleSettings
           ? `
         <form id="coupleConfigForm" style="margin-top:12px;background:rgba(0,0,0,0.18);padding:12px;border-radius:12px;display:grid;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:center;gap:18px;">
+            <div style="display:grid;justify-items:center;gap:3px;font-size:11.5px;">${avatarPickerHtml("husband", 54)}<span>남편 사진</span></div>
+            <div style="display:grid;justify-items:center;gap:3px;font-size:11.5px;">${avatarPickerHtml("wife", 54)}<span>아내 사진</span></div>
+          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
             <input type="text" name="husbandName" value="${escapeHtml(state.couple.husbandName)}" placeholder="남편 애칭" required>
             <input type="text" name="wifeName" value="${escapeHtml(state.couple.wifeName)}" placeholder="아내 애칭" required>
@@ -848,7 +1047,7 @@
       <div class="status-pair">
         <div class="status-box">
           <div class="status-who">
-            <span>🤖 ${escapeHtml(state.couple.husbandName)}</span>
+            <span class="status-name">${avatarPickerHtml("husband", 34)}${escapeHtml(state.couple.husbandName)}</span>
             <span>${escapeHtml(hStatus.updatedAt)}</span>
           </div>
           <div class="status-mood">${escapeHtml(hStatus.mood)}</div>
@@ -856,7 +1055,7 @@
         </div>
         <div class="status-box">
           <div class="status-who">
-            <span>🍎 ${escapeHtml(state.couple.wifeName)}</span>
+            <span class="status-name">${avatarPickerHtml("wife", 34)}${escapeHtml(state.couple.wifeName)}</span>
             <span>${escapeHtml(wStatus.updatedAt)}</span>
           </div>
           <div class="status-mood">${escapeHtml(wStatus.mood)}</div>
@@ -964,6 +1163,23 @@
         </div>
       </section>
     `;
+  }
+
+  // 퀘스트 탭 = 할일(장보기·집안일) + 소환 쿠폰
+  function renderQuestTab() {
+    const views = [
+      ["todo", "📋 할일 퀘스트"],
+      ["coupon", "🎟️ 보상 쿠폰"]
+    ];
+    const switcher = `
+      <div class="filter-pills" style="margin-bottom:10px;">
+        ${views
+          .map(function (v) {
+            return `<button type="button" class="pill ${questView === v[0] ? "is-active" : ""}" data-quest-view="${v[0]}">${v[1]}</button>`;
+          })
+          .join("")}
+      </div>`;
+    return switcher + (questView === "coupon" ? renderCouponTab() : renderTodoTab());
   }
 
   function renderTodoTab() {
@@ -1464,10 +1680,15 @@
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
             <label class="btn secondary" style="cursor:pointer;font-size:12.5px;padding:8px 10px;">
-              📷 사진 촬영 / 앨범 선택
-              <input type="file" id="memPhotoInput" accept="image/*" style="display:none;">
+              📷 사진 선택 (여러 장 OK)
+              <input type="file" id="memPhotoInput" accept="image/*" multiple style="display:none;">
             </label>
-            <input type="date" id="memDateInput" value="${escapeHtml(draftMemory.date)}" required>
+            <button type="button" class="btn secondary" id="memMyLocBtn" style="font-size:12.5px;padding:8px 10px;">📍 지금 내 위치</button>
+            <input type="date" id="memDateInput" value="${escapeHtml(draftMemory.date)}" required style="grid-column:span 2;">
+          </div>
+          <div style="font-size:11.5px;color:var(--muted);line-height:1.5;">
+            여러 장을 고르면 사진 속 위치·날짜로 바로 지도에 등록돼요. 위치 정보가 없는 사진은 아래에 선택된 지역으로 들어가요.
+            <br>🍎 아이폰은 사진 고를 때 위쪽 <strong>옵션 → 위치 포함</strong>을 켜 주세요.
           </div>
 
           ${
@@ -1787,9 +2008,8 @@
     const main = document.getElementById("mainView");
     if (!main) return;
     if (currentTab === "home") main.innerHTML = renderHomeTab();
-    else if (currentTab === "todo") main.innerHTML = renderTodoTab();
+    else if (currentTab === "quest") main.innerHTML = renderQuestTab();
     else if (currentTab === "cat") main.innerHTML = renderCatTab();
-    else if (currentTab === "coupon") main.innerHTML = renderCouponTab();
     else if (currentTab === "dinner") main.innerHTML = renderDinnerTab();
     else if (currentTab === "wiki") main.innerHTML = renderWikiTab();
   }
@@ -1815,14 +2035,14 @@
       reader.onload = function (ev) {
         const img = new Image();
         img.onload = function () {
-          const maxW = 720;
+          const maxW = 1080;
           const scale = img.width > maxW ? maxW / img.width : 1;
           const canvas = document.createElement("canvas");
           canvas.width = Math.round(img.width * scale);
           canvas.height = Math.round(img.height * scale);
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL("image/jpeg", 0.78));
+          resolve(canvas.toDataURL("image/jpeg", 0.8));
         };
         img.onerror = function () {
           resolve("");
@@ -1836,12 +2056,207 @@
     });
   }
 
+  // =========================================================================
+  // 추억 사진: 서버에 한 장씩 따로 저장 (state에는 주소만 남김)
+  // =========================================================================
+  function newPhotoId() {
+    return "p-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function isInlinePhoto(src) {
+    return typeof src === "string" && /^data:image\/(jpeg|jpg|png|webp)/i.test(src);
+  }
+
+  // data URL 사진을 서버에 올리고 "/api/photo?id=..." 주소를 돌려줌 (실패 시 null)
+  async function uploadPhotoDataUrl(dataUrl, id) {
+    if (location.protocol === "file:") return null;
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      const photoId = id || newPhotoId();
+      const res = await fetch("/api/photo?id=" + encodeURIComponent(photoId), {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: blob
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data && data.url ? data.url : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // 예전 방식(사진이 데이터 안에 통째로 들어있음)으로 저장된 사진을 서버로 옮김
+  let migratingPhotos = false;
+  async function migrateInlinePhotos() {
+    if (migratingPhotos || location.protocol === "file:") return;
+    const targets = state.memories.filter(function (m) {
+      return isInlinePhoto(m.photoDataUrl);
+    });
+    if (!targets.length) return;
+    migratingPhotos = true;
+    let changed = false;
+    try {
+      for (const mem of targets) {
+        // 추억 id 기반 고정 이름 → 두 폰이 동시에 옮겨도 같은 파일로 덮어씀
+        const safeId = "m-" + String(mem.id).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 60);
+        const url = await uploadPhotoDataUrl(mem.photoDataUrl, safeId);
+        if (!url) break; // 서버 문제면 다음에 다시 시도
+        const live = state.memories.find(function (m) {
+          return m.id === mem.id;
+        });
+        if (live && isInlinePhoto(live.photoDataUrl)) {
+          live.photoDataUrl = url;
+          changed = true;
+        }
+      }
+    } finally {
+      migratingPhotos = false;
+      if (changed) saveState();
+    }
+  }
+
+  function setMemStatus(text) {
+    draftMemory.locSource = text;
+    const tag = document.getElementById("exifStatusTag");
+    if (tag) tag.textContent = text;
+  }
+
+  function wait(ms) {
+    return new Promise(function (r) {
+      setTimeout(r, ms);
+    });
+  }
+
+  // 여러 장을 한 번에: 사진마다 촬영일·GPS를 읽어 지도에 자동 등록
+  // GPS 없는 사진은 폼에서 지금 선택된 지역(또는 "지금 내 위치")에 등록
+  let batchRunning = false;
+  async function registerPhotosBatch(files) {
+    if (batchRunning) return;
+    batchRunning = true;
+    const total = files.length;
+    const fallbackReg = getRegionById(draftMemory.regionId);
+    const fallbackPlace = (document.getElementById("memPlaceInput") || {}).value || draftMemory.placeName || "";
+    const fallbackDate = (document.getElementById("memDateInput") || {}).value || draftMemory.date;
+    let okCount = 0;
+    let gpsCount = 0;
+    let failCount = 0;
+    const added = [];
+
+    for (let i = 0; i < total; i++) {
+      setMemStatus(`⏳ 사진 등록 중 (${i + 1}/${total})`);
+      const file = files[i];
+      const [dataUrl, exif] = await Promise.all([compressImageFile(file), extractExifFromFile(file)]);
+      if (!dataUrl) {
+        failCount++;
+        continue;
+      }
+      const url = location.protocol === "file:" ? dataUrl : await uploadPhotoDataUrl(dataUrl);
+      if (!url) {
+        failCount++;
+        continue;
+      }
+
+      const hasGps = exif && Number.isFinite(exif.lat) && Number.isFinite(exif.lng);
+      const reg = hasGps ? latLngToKoreaRegion(exif.lat, exif.lng) : fallbackReg;
+      let placeName = "";
+      if (hasGps) {
+        gpsCount++;
+        placeName = await reverseGeocodeName(exif.lat, exif.lng);
+        await wait(1100); // 무료 지명 검색(OSM)은 초당 1회 제한
+      } else {
+        placeName = fallbackPlace;
+      }
+
+      // 같은 지역에 여러 장이면 핀이 완전히 겹치지 않게 살짝 흩뿌림
+      const jitter = function () {
+        return Math.round((Math.random() - 0.5) * 14);
+      };
+      const mem = {
+        id: "mem-" + Date.now() + "-" + i,
+        date: (exif && exif.date) || fallbackDate,
+        author: currentRole,
+        regionId: reg.id,
+        placeName: placeName || `${reg.name} 나들이`,
+        mapX: reg.pinX + jitter(),
+        mapY: reg.pinY + jitter(),
+        caption: "",
+        photoDataUrl: url
+      };
+      if (hasGps) {
+        mem.lat = exif.lat;
+        mem.lng = exif.lng;
+      }
+      added.push(mem);
+      okCount++;
+    }
+
+    // 최신 사진이 위로 오게 날짜순 정렬해서 추가
+    added.sort(function (a, b) {
+      return String(b.date).localeCompare(String(a.date));
+    });
+    state.memories = added.concat(state.memories);
+    if (added.length) selectedMemoryId = added[0].id;
+    draftMemory.photoDataUrl = "";
+
+    const noGps = okCount - gpsCount;
+    let msg = `✅ ${okCount}장 등록 완료`;
+    if (gpsCount) msg += ` · 위치 자동 ${gpsCount}장`;
+    if (noGps) msg += ` · ${fallbackReg.name}에 ${noGps}장`;
+    if (failCount) msg += ` · 실패 ${failCount}장`;
+    draftMemory.locSource = msg;
+    batchRunning = false;
+    saveState();
+  }
+
+  // "지금 내 위치" → 폼의 지역/장소를 현재 GPS 위치로 맞춤
+  function useMyLocationForDraft() {
+    if (!navigator.geolocation) {
+      setMemStatus("⚠️ 이 기기는 위치를 지원하지 않아요");
+      return;
+    }
+    setMemStatus("📡 현재 위치 찾는 중...");
+    navigator.geolocation.getCurrentPosition(
+      async function (pos) {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const reg = latLngToKoreaRegion(lat, lng);
+        draftMemory.regionId = reg.id;
+        draftMemory.mapX = reg.pinX;
+        draftMemory.mapY = reg.pinY;
+        draftMemory.lat = lat;
+        draftMemory.lng = lng;
+        const placeEl = document.getElementById("memPlaceInput");
+        const typed = placeEl ? placeEl.value.trim() : "";
+        draftMemory.placeName = typed || (await reverseGeocodeName(lat, lng));
+        draftMemory.locSource = `📍 현재 위치(${reg.name}) 적용!`;
+        renderMainView();
+      },
+      function () {
+        setMemStatus("⚠️ 위치 권한을 허용해 주세요");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }
+
   // Global Event Delegation
   document.addEventListener("click", function (e) {
     const roleBtn = e.target.closest("[data-role]");
     if (roleBtn) {
       currentRole = roleBtn.getAttribute("data-role");
       localStorage.setItem(ROLE_KEY, currentRole);
+      renderAll();
+      return;
+    }
+
+    if (e.target.closest("#memMyLocBtn")) {
+      useMyLocationForDraft();
+      return;
+    }
+
+    const questBtn = e.target.closest("[data-quest-view]");
+    if (questBtn) {
+      questView = questBtn.getAttribute("data-quest-view");
       renderAll();
       return;
     }
@@ -2235,6 +2650,21 @@
       return;
     }
 
+    const avatarInput = e.target.closest("[data-avatar-input]");
+    if (avatarInput) {
+      const role = avatarInput.getAttribute("data-avatar-input");
+      const file = avatarInput.files && avatarInput.files[0];
+      avatarInput.value = "";
+      if (!file || (role !== "husband" && role !== "wife")) return;
+      const dataUrl = await compressAvatarFile(file);
+      if (!dataUrl) return;
+      // 바꿀 때마다 새 id → 예전 사진이 캐시에 남아 보이는 일 없음
+      const url = (await uploadPhotoDataUrl(dataUrl, "avatar-" + role + "-" + Date.now().toString(36))) || dataUrl;
+      state.couple[role + "Photo"] = url;
+      saveState();
+      return;
+    }
+
     if (e.target.id === "memRegionSelect") {
       const reg = getRegionById(e.target.value);
       const placeEl = document.getElementById("memPlaceInput");
@@ -2248,7 +2678,13 @@
     }
 
     if (e.target.id === "memPhotoInput") {
-      const file = e.target.files && e.target.files[0];
+      const files = Array.from((e.target.files && e.target.files) || []);
+      e.target.value = ""; // 같은 사진을 다시 골라도 change가 발생하게
+      if (files.length > 1) {
+        await registerPhotosBatch(files);
+        return;
+      }
+      const file = files[0];
       if (!file) return;
 
       const placeEl = document.getElementById("memPlaceInput");
@@ -2453,9 +2889,14 @@
       }
 
       const placeName = typedPlace || `${reg.name} 나들이`;
-      const photoUrl =
+      let photoUrl =
         draftMemory.photoDataUrl ||
         createSampleSvgPhoto("#e05d44", "#d94b72", "📸", placeName.slice(0, 10));
+      if (isInlinePhoto(photoUrl)) {
+        setMemStatus("⏳ 사진 올리는 중...");
+        // 업로드 실패 시 일단 데이터에 넣어두고, 나중에 자동으로 다시 옮김
+        photoUrl = (await uploadPhotoDataUrl(photoUrl)) || photoUrl;
+      }
 
       const newMem = {
         id: "mem-" + Date.now(),

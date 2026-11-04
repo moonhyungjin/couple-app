@@ -911,7 +911,7 @@ textarea {
   max-width: 480px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 3px;
 }
 
@@ -944,3 +944,57 @@ textarea {
   background: var(--primary-soft);
 }
 
+
+
+/* 프로필 사진 */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  vertical-align: middle;
+}
+
+.role-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.role-btn .avatar {
+  border-width: 1px;
+}
+
+.avatar-picker {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.avatar-cam {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.status-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 12px;
+}
