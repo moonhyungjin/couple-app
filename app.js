@@ -529,6 +529,41 @@
     }
   }
 
+  function applyRemoteState(incoming) {
+    if (!incoming || !incoming.updatedAt) return false;
+    if (incoming.updatedAt <= (state.updatedAt || 0)) return false;
+    const merged = Object.assign(createInitialState(), incoming);
+    merged.memories = normalizeMemories(merged.memories);
+    merged.cat = Object.assign(createDefaultCatState(), incoming.cat || {});
+    state = merged;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (_) {}
+    renderAll();
+    return true;
+  }
+
+  function isUserTyping() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = (el.tagName || "").toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  }
+
+  async function pullStateFromServer() {
+    try {
+      const res = await fetch("/api/state", { cache: "no-store" });
+      if (!res.ok) return false;
+      const remote = await res.json();
+      if (remote && remote.updatedAt) {
+        applyRemoteState(remote);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function initRealtimeSync() {
     if (location.protocol === "file:") {
       updateSyncPill("로컬 저장됨", false);
@@ -538,30 +573,45 @@
       const res = await fetch("/api/state", { cache: "no-store" });
       if (!res.ok) throw new Error("No backend");
       const remote = await res.json();
-      if (remote && remote.updatedAt && remote.updatedAt > (state.updatedAt || 0)) {
-        state = Object.assign(createInitialState(), remote);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        renderAll();
+      if (remote && remote.updatedAt) {
+        if (remote.updatedAt > (state.updatedAt || 0)) {
+          applyRemoteState(remote);
+        }
       } else {
         await pushStateToServer();
       }
       serverConnected = true;
-      updateSyncPill("Wi-Fi 실시간 동기화 중", true);
+      updateSyncPill("실시간 동기화 중", true);
 
-      const es = new EventSource("/api/stream");
-      es.onmessage = function (ev) {
-        try {
-          const incoming = JSON.parse(ev.data);
-          if (incoming && incoming.updatedAt && incoming.updatedAt > (state.updatedAt || 0)) {
-            state = Object.assign(createInitialState(), incoming);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-            renderAll();
-          }
-        } catch (_) {}
-      };
-      es.onerror = function () {
-        updateSyncPill("로컬 저장됨 (오프라인)", false);
-      };
+      // 1) 클라우드(Vercel) 및 모바일 환경 대응: 주기적 동기화 + 화면 복귀 시 즉시 동기화
+      setInterval(function () {
+        if (document.hidden || isUserTyping()) return;
+        pullStateFromServer();
+      }, 4000);
+
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) {
+          pullStateFromServer();
+        }
+      });
+
+      // 2) 로컬 Node 서버(server.cjs) 환경일 때는 SSE 스트림도 함께 연결
+      const isLocalHost =
+        location.hostname === "localhost" ||
+        location.hostname === "127.0.0.1" ||
+        /^192\.168\.|^10\.|^172\./.test(location.hostname);
+
+      if (isLocalHost && typeof EventSource !== "undefined") {
+        const es = new EventSource("/api/stream");
+        es.onmessage = function (ev) {
+          try {
+            const incoming = JSON.parse(ev.data);
+            if (!isUserTyping()) {
+              applyRemoteState(incoming);
+            }
+          } catch (_) {}
+        };
+      }
     } catch (_) {
       updateSyncPill("로컬 저장됨", false);
     }
