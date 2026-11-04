@@ -10,35 +10,85 @@ const ROOM_CODE = "our-secret-home-2026";
 
 function resolveSupabaseCredentials() {
   const env = process.env || {};
+  const keys = Object.keys(env);
 
-  const url =
+  // 1) Supabase URL 찾기 (명시적 변수명 -> 값에 .supabase.co 포함된 변수 -> POSTGRES_URL에서 추출)
+  let url =
     env.SUPABASE_URL ||
     env.NEXT_PUBLIC_SUPABASE_URL ||
     env.STORAGE_SUPABASE_URL ||
     env.STORAGE_NEXT_PUBLIC_SUPABASE_URL ||
-    Object.keys(env)
-      .filter((k) => k.endsWith("SUPABASE_URL") && env[k])
-      .map((k) => env[k])[0] ||
+    env.STORAGE_URL ||
     "";
 
-  const key =
+  if (!url) {
+    for (const k of keys) {
+      const val = String(env[k] || "").trim();
+      if (/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(val)) {
+        url = val;
+        break;
+      }
+    }
+  }
+
+  if (!url) {
+    // POSTGRES_URL 등에서 project ref 추출 (예: postgres.xxxx:password@... 또는 db.xxxx.supabase.co)
+    for (const k of keys) {
+      const val = String(env[k] || "");
+      const m1 = val.match(/postgres\.([a-z0-9]{15,25}):/i);
+      const m2 = val.match(/db\.([a-z0-9]{15,25})\.supabase\.co/i);
+      const ref = (m1 && m1[1]) || (m2 && m2[1]);
+      if (ref) {
+        url = `https://${ref}.supabase.co`;
+        break;
+      }
+    }
+  }
+
+  // 2) Service Role Key 우선, 없으면 Anon Key 찾기
+  let key =
     env.SUPABASE_SERVICE_ROLE_KEY ||
     env.STORAGE_SUPABASE_SERVICE_ROLE_KEY ||
-    env.SUPABASE_ANON_KEY ||
-    env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    env.STORAGE_SUPABASE_ANON_KEY ||
-    Object.keys(env)
-      .filter(
-        (k) =>
-          (k.endsWith("SUPABASE_SERVICE_ROLE_KEY") || k.endsWith("SUPABASE_ANON_KEY")) &&
-          env[k]
-      )
-      .map((k) => env[k])[0] ||
+    env.STORAGE_SERVICE_ROLE_KEY ||
     "";
 
+  if (!key) {
+    for (const k of keys) {
+      if (
+        (k.endsWith("SERVICE_ROLE_KEY") || k.endsWith("SECRET_KEY")) &&
+        env[k]
+      ) {
+        key = env[k];
+        break;
+      }
+    }
+  }
+
+  if (!key) {
+    key =
+      env.SUPABASE_ANON_KEY ||
+      env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      env.STORAGE_SUPABASE_ANON_KEY ||
+      env.STORAGE_NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      env.STORAGE_ANON_KEY ||
+      "";
+  }
+
+  if (!key) {
+    for (const k of keys) {
+      if (
+        (k.endsWith("ANON_KEY") || k.endsWith("PUBLISHABLE_KEY")) &&
+        env[k]
+      ) {
+        key = env[k];
+        break;
+      }
+    }
+  }
+
   return {
-    url: url.replace(/\/+$/, ""),
-    key
+    url: String(url || "").replace(/\/+$/, ""),
+    key: String(key || "").trim()
   };
 }
 
@@ -52,7 +102,6 @@ function authHeaders(key, extra) {
   );
 }
 
-// 1) 만약 couple_room 테이블이 있으면 테이블 사용, 없으면 Storage 버킷 자동 생성 후 사용
 async function readStateFromSupabase(url, key) {
   // A. Storage 버킷에서 먼저 조회
   try {
