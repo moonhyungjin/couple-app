@@ -104,6 +104,7 @@
     form.elements.password.value = '';
     form.elements.passwordConfirm.value = '';
     document.getElementById('loginSubmit').textContent = signup ? '회원가입' : '로그인';
+    document.getElementById('authFormTitle').textContent = signup ? '우리의 이야기를 시작해요' : '우리의 하루를 이어볼까요?';
     message.textContent = signup ? '비밀번호는 8자 이상 입력해 주세요. 가입 후 이메일 인증을 진행해요.' : '내 계정으로 로그인해 주세요.';
   }
   document.getElementById('showLogin').addEventListener('click', () => setAuthMode('login'));

@@ -994,9 +994,6 @@ textarea {
 #pairChoices, #pairWaiting { display: grid; gap: 18px; }
 #pairChoices h2, #pairWaiting h2 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
 .pair-divider { padding: 12px 0; border-top: 1px solid var(--border, #ddd); text-align: center; font-size: 13px; color: var(--muted); }
-.auth-modes { display: flex; gap: 8px; margin: 20px 0; }
-.auth-modes button { flex: 1; }
-.auth-modes [aria-pressed="false"] { opacity: .65; }
 #pairPanel h1, #pairPanel p { margin: 0; }
 #pairInvite { display: grid; gap: 12px; padding: 16px; border-radius: 14px; background: var(--primary-soft); }
 #pairInviteCode { display: block; font-size: 18px; font-weight: 700; letter-spacing: 1px; overflow-wrap: anywhere; user-select: all; }
@@ -1024,7 +1021,54 @@ textarea {
   font-size: 12px;
 }
 [hidden] { display: none !important; }
-.login-panel { max-width: 420px; margin: 12vh auto; padding: 24px; }
+.login-panel { max-width: 440px; margin: 6vh auto; padding: 28px; }
 .login-panel form, .login-panel label { display: grid; gap: 10px; }
 .login-panel form { gap: 18px; }
+.auth-panel { position: relative; max-width: 440px; margin: 0 auto; padding: 32px 24px 8px; }
+.auth-brand { display: flex; align-items: center; justify-content: center; gap: 9px; font-size: 14px; font-weight: 750; letter-spacing: -.4px; }
+.auth-brand-icon { width: 32px; height: 32px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); border-radius: 10px; }
+.auth-brand-icon svg { width: 25px; height: 25px; }
+.auth-welcome { text-align: center; padding: 24px 0 25px; }
+.auth-house { position: relative; width: 124px; height: 112px; margin: 0 auto 15px; background: radial-gradient(ellipse at center, #f8e9da 0%, #faeee3 55%, transparent 70%); }
+.auth-house > svg { width: 120px; height: 110px; }
+.auth-spark { position: absolute; color: #c78d71; font-size: 18px; }
+.auth-spark-one { left: -8px; top: 23px; font-size: 13px; }
+.auth-spark-two { right: -4px; top: 5px; transform: rotate(14deg); }
+.auth-welcome h1 { margin: 0; font-size: clamp(27px, 7vw, 32px); line-height: 1.35; letter-spacing: -1.3px; font-weight: 750; }
+.auth-welcome p { margin: 12px 0 0; color: var(--muted); font-size: 13px; line-height: 1.75; letter-spacing: -.25px; }
+.auth-card { background: var(--surface); border: 1px solid var(--line); border-radius: 24px; padding: 25px 24px 17px; box-shadow: 0 12px 40px rgba(100, 62, 38, .055); }
+.auth-card-heading { margin-bottom: 20px; }
+.auth-eyebrow { color: #a47560; font-size: 9px; font-weight: 750; letter-spacing: 2px; }
+.auth-card-heading h2 { margin: 6px 0 0; font-size: 18px; letter-spacing: -.6px; font-weight: 700; }
+.auth-modes { display: flex; gap: 4px; padding: 4px; margin-bottom: 23px; background: var(--surface-soft); border-radius: 12px; }
+.auth-modes .btn { flex: 1; min-height: 39px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; transition: background .15s, box-shadow .15s, color .15s; }
+.auth-modes [aria-pressed="true"] { color: var(--ink); background: var(--surface); box-shadow: 0 2px 6px rgba(70, 40, 24, .08); }
+.auth-form label { gap: 8px; min-width: 0; }
+.auth-form label > span:first-child { font-size: 12px; color: var(--ink); font-weight: 650; }
+.auth-input-wrap { display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); transition: border-color .15s, box-shadow .15s; }
+.auth-input-wrap svg { flex: none; width: 18px; height: 18px; fill: none; stroke: #a5948b; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.auth-input-wrap input { width: 100%; min-width: 0; padding: 13px 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 16px; line-height: 1.4; border-radius: 0; }
+.auth-input-wrap input::placeholder { color: #a5948b; font-size: 12px; opacity: 1; }
+.auth-input-wrap:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.auth-form .auth-submit { min-height: 50px; width: 100%; margin-top: 3px; border-radius: 12px; background: #db654c; color: #fff; font-size: 14px; font-weight: 700; box-shadow: 0 5px 12px rgba(219, 101, 76, .17); transition: background .15s, transform .15s; }
+.auth-submit::after { content: '→'; margin-left: 6px; font-size: 18px; font-weight: 400; }
+.auth-submit:hover { background: #ca573f; }
+.auth-submit:active { transform: translateY(1px); }
+.auth-submit:disabled { opacity: .65; cursor: wait; box-shadow: none; }
+.auth-modes .btn:focus-visible, .auth-submit:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.auth-message { min-height: 32px; margin: 15px 0 0; font-size: 11px; line-height: 1.6; text-align: center; color: var(--muted); overflow-wrap: anywhere; }
+.auth-footer { display: flex; justify-content: center; align-items: center; gap: 9px; padding: 23px 0 0; color: #b28d7b; }
+.auth-footer > span { font-size: 27px; }
+.auth-footer p { margin: 0; font-size: 11px; line-height: 1.7; }
+.auth-footer p span { color: var(--muted); font-size: 10px; }
+.connection-panel { margin-top: 40px; background: var(--surface); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow); }
+.connection-panel h1 { font-size: 23px; letter-spacing: -.8px; }
+.connection-panel > p { color: var(--muted); font-size: 13px; line-height: 1.75; }
+.connection-panel label { font-size: 12px; font-weight: 600; }
+.connection-panel input, .connection-panel select { min-height: 48px; font-size: 16px; }
+.connection-panel input::placeholder { font-size: 12px; }
+.connection-panel .btn { min-height: 46px; white-space: normal; }
+#pairLogoutBtn { background: transparent; color: var(--muted); border: 0; text-decoration: underline; text-underline-offset: 4px; }
+@media (min-width: 700px) { .auth-panel { padding-top: 45px; } .auth-welcome { padding-top: 30px; } }
+@media (max-width: 360px) { .auth-panel { padding: 22px 16px 8px; } .auth-card { padding: 22px 18px 16px; } .auth-welcome { padding: 18px 0 22px; } .connection-panel { margin: 20px 14px; padding: 22px; } }
 #accountIdentity { display: flex; align-items: center; gap: 6px; }
