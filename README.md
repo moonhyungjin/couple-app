@@ -41,7 +41,7 @@ alter table public.couple_room enable row level security;
 revoke all on public.couple_room from anon, authenticated;
 ```
 
-4. [supabase-spaces.sql](./supabase-spaces.sql)을 Supabase SQL Editor에서 실행합니다. 공간·멤버십 테이블과 서버 전용 함수를 만듭니다. 이전 `supabase-pairing.sql`은 실행하지 않아도 됩니다. 이미 실행했던 이전 테이블과 데이터는 보존됩니다.
+4. [supabase-spaces.sql](./supabase-spaces.sql)을 Supabase SQL Editor 또는 Vercel Storage의 Query에서 실행합니다. Vercel Query에서는 **Read-only를 끄고**, 파일 전체(`DO $migration$` 블록 포함)를 한 번에 실행합니다. 공간·멤버십 테이블과 서버 전용 함수를 만듭니다. 이전 `supabase-pairing.sql`은 실행하지 않아도 됩니다. 이미 실행했던 이전 테이블과 데이터는 보존됩니다.
 5. 환경변수 설정 후 배포합니다. 한 사람이 **회원가입 → 이메일 인증 → 로그인 → 공간 만들고 배우자 초대하기**를 진행합니다. 배우자는 **회원가입 → 이메일 인증 → 로그인 → 배우자로 연결하기**에서 받은 코드를 입력합니다. 코드는 15분 동안 한 번 사용할 수 있으며 본인이 만든 코드는 본인이 수락할 수 없습니다. 새 코드를 만들면 이전 코드는 무효가 됩니다.
 6. 연결 전에는 `/api/state`와 `/api/photo`가 거부되는지 확인합니다. 연결 후에는 내 사진만 바꿀 수 있고 배우자 사진은 눌러 확대할 수 있어야 합니다. 내 사진은 72px, 배우자 사진은 92px로 표시하며 애칭도 본인 것만 수정합니다.
 

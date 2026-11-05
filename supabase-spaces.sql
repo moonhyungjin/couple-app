@@ -1,4 +1,7 @@
 -- 직접 회원가입 + 부부별 공간. 기존 couple_pair 테이블과 이전 데이터는 삭제하지 않는다.
+-- Vercel Query에서도 한 명령으로 실행한다. Read-only를 끄고 파일 전체를 실행한다.
+DO $migration$
+BEGIN
 create table if not exists public.couple_spaces (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(name) between 1 and 40),
@@ -66,3 +69,5 @@ end;
 $$;
 revoke all on function public.manage_couple_space(text, uuid, text, text, text) from public, anon, authenticated;
 grant execute on function public.manage_couple_space(text, uuid, text, text, text) to service_role;
+END;
+$migration$;
