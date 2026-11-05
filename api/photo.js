@@ -6,6 +6,7 @@
  */
 
 const { resolveSupabaseCredentials, authHeaders } = require("./_supabase");
+const { requireCouple } = require("./_pair");
 
 const PHOTO_BUCKET = "couple-app-photos";
 const MAX_BYTES = 4 * 1024 * 1024; // Vercel 요청 본문 한도(4.5MB) 안쪽
@@ -19,6 +20,10 @@ function sendJson(res, status, obj) {
 }
 
 async function readRawBody(req) {
+  if (Buffer.isBuffer(req.body)) {
+    if (req.body.length > MAX_BYTES) throw Object.assign(new Error('too large'), { status: 413 });
+    return req.body;
+  }
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
@@ -42,9 +47,10 @@ module.exports = async function handler(req, res) {
     sendJson(res, 400, { ok: false, error: "invalid id" });
     return;
   }
-  const objectUrl = `${url}/storage/v1/object/${PHOTO_BUCKET}/${id}.jpg`;
 
   try {
+    const user = await requireCouple(req);
+    const objectUrl = `${url}/storage/v1/object/${PHOTO_BUCKET}/spaces/${user.spaceId}/${id}.jpg`;
     if (req.method === "GET") {
       const r = await fetch(objectUrl, { headers: authHeaders(key) });
       if (!r.ok) {
@@ -55,12 +61,16 @@ module.exports = async function handler(req, res) {
       res.statusCode = 200;
       res.setHeader("Content-Type", "image/jpeg");
       // 사진 id마다 내용이 고정이라 한 번 받으면 폰·CDN에 계속 캐시 → 전송량 절약
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("Cache-Control", "private, no-store");
       res.end(buf);
       return;
     }
 
     if (req.method === "POST") {
+      if (id.startsWith('avatar-') && !id.startsWith(`avatar-${user.role}-`)) {
+        sendJson(res, 403, { error: '배우자의 프로필은 수정할 수 없습니다.' });
+        return;
+      }
       const body = await readRawBody(req);
       if (!body.length) {
         sendJson(res, 400, { ok: false, error: "empty body" });
@@ -80,7 +90,7 @@ module.exports = async function handler(req, res) {
         method: "POST",
         headers: authHeaders(key, {
           "Content-Type": "image/jpeg",
-          "x-upsert": "true",
+          "x-upsert": "false",
           "Cache-Control": "max-age=31536000"
         }),
         body

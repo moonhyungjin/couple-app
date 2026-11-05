@@ -178,11 +178,12 @@ body {
 .status-pair {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
 }
 
 .status-box {
+  min-width: 0;
   background: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(6px);
   border: 1px solid rgba(255, 255, 255, 0.22);
@@ -975,16 +976,40 @@ textarea {
   display: inline-flex;
   cursor: pointer;
 }
+.avatar-edit, .avatar-view { position: relative; display: inline-flex; padding: 0; border: 0; background: transparent; border-radius: 50%; cursor: pointer; color: inherit; }
+.avatar-edit:focus-visible, .avatar-view:focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
+.avatar-zoom { position: absolute; right: 0; bottom: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #fff; color: #333; font-size: 20px; }
+.profile-identity { display: flex; flex-direction: column; align-items: center; gap: 7px; margin-bottom: 8px; min-height: 145px; justify-content: flex-end; }
+.profile-identity .status-name { display: block; max-width: 100%; overflow-wrap: anywhere; text-align: center; font-size: 14px; }
+.profile-hint, .profile-updated { font-size: 11px; opacity: .85; }
+.partner-profile { background: rgba(255, 255, 255, .23); }
+.profile-photo-dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); padding: 18px; border: 0; border-radius: 20px; background: var(--card, #fff); color: var(--text, #222); }
+.profile-photo-dialog::backdrop { background: rgba(0, 0, 0, .72); }
+.profile-photo-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.profile-photo-heading h2 { font-size: 17px; margin: 0; overflow-wrap: anywhere; }
+#profilePhotoContent { display: grid; place-items: center; }
+#profilePhotoContent .avatar { max-width: 100%; height: auto !important; aspect-ratio: 1; border-radius: 16px; object-fit: contain; box-shadow: none; }
+#profilePhotoContent .avatar-emoji { font-size: clamp(64px, 40vw, 180px) !important; }
+#pairPanel { display: grid; gap: 18px; }
+#pairChoices, #pairWaiting { display: grid; gap: 18px; }
+#pairChoices h2, #pairWaiting h2 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.pair-divider { padding: 12px 0; border-top: 1px solid var(--border, #ddd); text-align: center; font-size: 13px; color: var(--muted); }
+.auth-modes { display: flex; gap: 8px; margin: 20px 0; }
+.auth-modes button { flex: 1; }
+.auth-modes [aria-pressed="false"] { opacity: .65; }
+#pairPanel h1, #pairPanel p { margin: 0; }
+#pairInvite { display: grid; gap: 12px; padding: 16px; border-radius: 14px; background: var(--primary-soft); }
+#pairInviteCode { display: block; font-size: 18px; font-weight: 700; letter-spacing: 1px; overflow-wrap: anywhere; user-select: all; }
 
 .avatar-cam {
   position: absolute;
   right: -3px;
   bottom: -3px;
-  width: 16px;
-  height: 16px;
+  width: 25px;
+  height: 25px;
   border-radius: 50%;
   background: #fff;
-  font-size: 9px;
+  font-size: 13px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -998,3 +1023,8 @@ textarea {
   font-weight: 700;
   font-size: 12px;
 }
+[hidden] { display: none !important; }
+.login-panel { max-width: 420px; margin: 12vh auto; padding: 24px; }
+.login-panel form, .login-panel label { display: grid; gap: 10px; }
+.login-panel form { gap: 18px; }
+#accountIdentity { display: flex; align-items: center; gap: 6px; }

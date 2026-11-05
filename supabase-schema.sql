@@ -8,6 +8,10 @@ create table if not exists public.couple_room (
   updated_at timestamptz not null default now()
 );
 
+-- API 서버의 service_role만 접근한다. 클라이언트에서 직접 상태를 읽거나 쓰지 않는다.
+alter table public.couple_room enable row level security;
+revoke all on public.couple_room from anon, authenticated;
+
 -- 실시간(Realtime) 브로드캐스트 활성화
 alter publication supabase_realtime add table public.couple_room;
 

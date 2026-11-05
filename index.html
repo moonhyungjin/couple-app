@@ -14,14 +14,61 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <!-- 상단: 남편(Android) / 아내(iPhone) 시점 전환 및 실시간 동기화 상태 -->
-    <header class="top-bar">
-      <div class="role-switch" role="tablist" aria-label="내 역할 선택">
-        <button type="button" class="role-btn is-active" data-role="husband">🤖 남편 (Android)</button>
-        <button type="button" class="role-btn" data-role="wife">🍎 아내 (iPhone)</button>
+  <section id="loginPanel" class="login-panel">
+    <h1>우리 둘만의 집 ❤️</h1>
+    <p>각자 가입하고, 초대를 주고받아 우리만의 공간을 만들어요.</p>
+    <div class="auth-modes" aria-label="계정 시작 방법">
+      <button type="button" class="btn" id="showLogin" aria-pressed="true">로그인</button>
+      <button type="button" class="btn secondary" id="showSignup" aria-pressed="false">회원가입</button>
+    </div>
+    <form id="loginForm">
+      <label>이메일<input type="email" name="email" autocomplete="username" required></label>
+      <label>비밀번호<input type="password" name="password" autocomplete="current-password" maxlength="128" required></label>
+      <label id="passwordConfirmLabel" hidden>비밀번호 확인<input type="password" name="passwordConfirm" autocomplete="new-password" maxlength="128"></label>
+      <button class="btn" id="loginSubmit" type="submit">로그인</button>
+    </form>
+    <p id="loginMessage" role="status">로그인 확인 중…</p>
+  </section>
+  <section id="pairPanel" class="login-panel" hidden>
+    <h1>우리 부부 연결하기 ❤️</h1>
+    <p>한 사람이 공간을 만들고, 배우자는 초대 코드를 받아 참여해요.</p>
+    <div id="pairChoices">
+      <form id="createSpaceForm">
+        <h2>새 부부 공간 만들기</h2>
+        <label>공간 이름<input type="text" name="name" maxlength="40" value="우리 둘만의 집" required></label>
+        <label>내 역할<select name="role" required><option value="">내 역할을 선택해 주세요</option><option value="husband">남편</option><option value="wife">아내</option></select></label>
+        <button type="submit" class="btn">공간 만들고 배우자 초대하기</button>
+      </form>
+      <div class="pair-divider">배우자가 이미 만들었다면</div>
+      <form id="pairAcceptForm">
+        <label>배우자의 초대 코드<input type="text" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="배우자가 만든 코드를 입력해 주세요" required></label>
+        <button type="submit" class="btn">배우자로 연결하기</button>
+      </form>
+    </div>
+    <div id="pairWaiting" hidden>
+      <h2 id="pairSpaceName"></h2>
+      <p id="pairRoleLabel"></p>
+      <button type="button" class="btn secondary" id="createPairInvite">새 초대 코드 만들기</button>
+      <div id="pairInvite" hidden>
+      <p>배우자에게 아래 코드를 전달해 주세요. 15분 동안 한 번 사용할 수 있어요.</p>
+      <output id="pairInviteCode" aria-label="배우자 초대 코드"></output>
+      <p id="pairInviteExpiry"></p>
+      <button type="button" class="btn secondary" id="copyPairInvite">코드 복사</button>
       </div>
+    </div>
+    <p id="pairMessage" role="status"></p>
+    <button type="button" class="btn secondary" id="pairLogoutBtn">다른 계정으로 로그인</button>
+  </section>
+  <dialog id="profilePhotoDialog" class="profile-photo-dialog" aria-labelledby="profilePhotoTitle">
+    <div class="profile-photo-heading"><h2 id="profilePhotoTitle">프로필 사진</h2><button type="button" class="icon-btn" id="closeProfilePhoto" aria-label="사진 닫기">✕</button></div>
+    <div id="profilePhotoContent"></div>
+  </dialog>
+  <div class="app-shell" hidden>
+    <!-- 상단: 로그인 계정 및 실시간 동기화 상태 -->
+    <header class="top-bar">
+      <div class="role-switch" id="accountIdentity" aria-label="로그인한 계정"></div>
       <div class="top-actions">
+        <button type="button" class="btn secondary" id="logoutBtn">로그아웃</button>
         <span class="sync-pill" id="syncStatus"><span class="sync-dot"></span><span id="syncText">로컬 저장됨</span></span>
         <button type="button" class="icon-btn" id="themeBtn" title="다크모드 전환" aria-label="다크모드 전환">🌙</button>
       </div>
@@ -38,7 +85,7 @@
   </div>
 
   <!-- 하단 5탭 네비게이션 -->
-  <nav class="bottom-nav" aria-label="하단 메뉴">
+  <nav class="bottom-nav" aria-label="하단 메뉴" hidden>
     <div class="bottom-nav-inner">
       <button type="button" class="nav-tab is-active" data-tab="home">
         <span class="ico">🏠</span><span class="lbl">홈</span>
@@ -58,7 +105,7 @@
     </div>
   </nav>
 
-  <script src="./app.js"></script>
+  <script src="./auth.js"></script>
 </body>
 </html>
 

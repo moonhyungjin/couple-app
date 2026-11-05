@@ -2,7 +2,6 @@
   "use strict";
 
   const STORAGE_KEY = "couple_app_mvp_state_v2";
-  const ROLE_KEY = "couple_app_role_v1";
   const THEME_KEY = "couple_app_theme_v1";
 
   const MOOD_PRESETS = [
@@ -426,7 +425,8 @@
   }
 
   let state = loadState();
-  let currentRole = localStorage.getItem(ROLE_KEY) || "husband";
+  if (!window.coupleUser) return;
+  const currentRole = window.coupleUser.role;
   let currentTab = "home";
   let questView = "todo"; // 퀘스트 탭 안: "todo"(할일) | "coupon"(쿠폰)
   let todoFilter = "전체";
@@ -656,7 +656,7 @@
   }
 
   async function fetchRemoteState() {
-    const res = await fetch("/api/state?t=" + Date.now(), { cache: "no-store" });
+    const res = await window.coupleFetch("/api/state?t=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("GET /api/state " + res.status);
     const data = await res.json();
     return data && typeof data === "object" && data.updatedAt ? data : null;
@@ -689,12 +689,17 @@
         merged.updatedAt = Math.max(remote.updatedAt || 0, localSnap.updatedAt || 0);
       }
 
+      if (remote) {
+        const partner = partnerRole();
+        merged.couple[partner + 'Name'] = remote.couple[partner + 'Name'];
+        merged.couple[partner + 'Photo'] = remote.couple[partner + 'Photo'];
+      }
       if (!remote || !deepEqual(merged, remote)) {
         const body = JSON.stringify(merged);
         if (body.length > MAX_PAYLOAD_BYTES) {
           throw Object.assign(new Error("payload too large"), { code: "TOO_LARGE" });
         }
-        const res = await fetch("/api/state", {
+        const res = await window.coupleFetch("/api/state", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body
@@ -757,18 +762,6 @@
       if (!document.hidden) syncWithServer({ forceRender: true });
     });
 
-    // 로컬 Node 서버(server.cjs)일 때는 SSE로 변경 즉시 감지
-    const isLocalHost =
-      location.hostname === "localhost" ||
-      location.hostname === "127.0.0.1" ||
-      /^192\.168\.|^10\.|^172\./.test(location.hostname);
-
-    if (isLocalHost && typeof EventSource !== "undefined") {
-      const es = new EventSource("/api/stream");
-      es.onmessage = function () {
-        if (!isUserTyping()) syncWithServer();
-      };
-    }
   }
 
   window.addEventListener("storage", function (e) {
@@ -948,12 +941,15 @@
 
   // 누르면 사진을 고를 수 있는 아바타
   function avatarPickerHtml(role, size) {
+    if (role !== currentRole) return `<button type="button" class="avatar-view" data-avatar-view="${role}" aria-label="${escapeHtml(roleLabel(role))} 프로필 사진 크게 보기">${avatarHtml(role, size)}<span class="avatar-zoom" aria-hidden="true">⤢</span></button>`;
     return `
-      <label class="avatar-picker" title="${escapeHtml(roleLabel(role))} 프로필 사진 바꾸기">
-        ${avatarHtml(role, size)}
-        <span class="avatar-cam">📷</span>
+      <span class="avatar-picker">
+        <button type="button" class="avatar-edit" data-avatar-edit="${role}" aria-label="내 프로필 사진 바꾸기">
+          ${avatarHtml(role, size)}
+          <span class="avatar-cam" aria-hidden="true">📷</span>
+        </button>
         <input type="file" accept="image/*" data-avatar-input="${role}" style="display:none;">
-      </label>`;
+      </span>`;
   }
 
   // 사진 가운데를 정사각형으로 잘라 작게 압축
@@ -987,19 +983,13 @@
   }
 
   function renderRoleBar() {
-    document.querySelectorAll(".role-btn").forEach(function (btn) {
-      const role = btn.getAttribute("data-role");
-      btn.classList.toggle("is-active", role === currentRole);
-      btn.innerHTML = `${avatarHtml(role, 20)}<span>${role === "husband" ? "남편 (Android)" : "아내 (iPhone)"}</span>`;
-    });
+    document.getElementById('accountIdentity').innerHTML = `${avatarHtml(currentRole, 36)}<span>${escapeHtml(roleLabel(currentRole))} · 나</span>`;
   }
 
   function renderHero() {
     const hero = document.getElementById("heroSection");
     if (!hero) return;
     const dday = calcDaysTogether(state.couple.startDate);
-    const hStatus = state.status.husband;
-    const wStatus = state.status.wife;
 
     hero.innerHTML = `
       <div class="hero-top">
@@ -1024,13 +1014,14 @@
           ? `
         <form id="coupleConfigForm" style="margin-top:12px;background:rgba(0,0,0,0.18);padding:12px;border-radius:12px;display:grid;gap:8px;">
           <div style="display:flex;align-items:center;justify-content:center;gap:18px;">
-            <div style="display:grid;justify-items:center;gap:3px;font-size:11.5px;">${avatarPickerHtml("husband", 54)}<span>남편 사진</span></div>
-            <div style="display:grid;justify-items:center;gap:3px;font-size:11.5px;">${avatarPickerHtml("wife", 54)}<span>아내 사진</span></div>
+            <div style="display:grid;justify-items:center;gap:8px;font-size:12px;">${avatarPickerHtml(currentRole, 80)}<span>내 사진 · 변경</span></div>
+            <div style="display:grid;justify-items:center;gap:8px;font-size:12px;">${avatarPickerHtml(partnerRole(), 96)}<span>배우자 사진 · 크게 보기</span></div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-            <input type="text" name="husbandName" value="${escapeHtml(state.couple.husbandName)}" placeholder="남편 애칭" required>
-            <input type="text" name="wifeName" value="${escapeHtml(state.couple.wifeName)}" placeholder="아내 애칭" required>
+            <input type="text" name="husbandName" value="${escapeHtml(state.couple.husbandName)}" aria-label="남편 애칭" placeholder="남편 애칭" ${currentRole === "husband" ? "required" : "disabled"}>
+            <input type="text" name="wifeName" value="${escapeHtml(state.couple.wifeName)}" aria-label="아내 애칭" placeholder="아내 애칭" ${currentRole === "wife" ? "required" : "disabled"}>
           </div>
+          <div style="font-size:12px;">사진과 애칭은 내 것만 수정할 수 있어요. 기념일은 함께 수정해요.</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
             <input type="text" name="anniversaryTitle" value="${escapeHtml(state.couple.anniversaryTitle)}" placeholder="기념일 이름">
             <input type="date" name="startDate" value="${escapeHtml(state.couple.startDate)}" required>
@@ -1045,22 +1036,20 @@
       }
 
       <div class="status-pair">
-        <div class="status-box">
-          <div class="status-who">
-            <span class="status-name">${avatarPickerHtml("husband", 34)}${escapeHtml(state.couple.husbandName)}</span>
-            <span>${escapeHtml(hStatus.updatedAt)}</span>
+        ${[currentRole, partnerRole()].map(function (role) {
+          const status = state.status[role];
+          const isMe = role === currentRole;
+          return `<div class="status-box ${isMe ? 'my-profile' : 'partner-profile'}">
+          <div class="profile-identity">
+            ${avatarPickerHtml(role, isMe ? 72 : 92)}
+            <span class="status-name">${escapeHtml(roleLabel(role))}</span>
+            <span class="profile-hint">${isMe ? '나 · 사진 변경' : '배우자 · 크게 보기'}</span>
           </div>
-          <div class="status-mood">${escapeHtml(hStatus.mood)}</div>
-          <div class="status-msg" title="${escapeHtml(hStatus.message)}">${escapeHtml(hStatus.message)}</div>
-        </div>
-        <div class="status-box">
-          <div class="status-who">
-            <span class="status-name">${avatarPickerHtml("wife", 34)}${escapeHtml(state.couple.wifeName)}</span>
-            <span>${escapeHtml(wStatus.updatedAt)}</span>
-          </div>
-          <div class="status-mood">${escapeHtml(wStatus.mood)}</div>
-          <div class="status-msg" title="${escapeHtml(wStatus.message)}">${escapeHtml(wStatus.message)}</div>
-        </div>
+          <div class="status-mood">${escapeHtml(status.mood)}</div>
+          <div class="status-msg" title="${escapeHtml(status.message)}">${escapeHtml(status.message)}</div>
+          <span class="profile-updated">${escapeHtml(status.updatedAt)}</span>
+        </div>`;
+        }).join('')}
       </div>
     `;
   }
@@ -1095,7 +1084,7 @@
         <div class="card-head">
           <div>
             <h2 class="card-title">👋 지금 내 상태 · 한마디</h2>
-            <div class="card-sub">현재 선택된 시점: <strong>${currentRole === "husband" ? "🤖 " + escapeHtml(state.couple.husbandName) : "🍎 " + escapeHtml(state.couple.wifeName)}</strong></div>
+            <div class="card-sub">내 계정: <strong>${escapeHtml(roleLabel(currentRole))}</strong></div>
           </div>
           <button type="button" class="btn rose" id="pokePartnerBtn" style="padding:7px 12px;font-size:12.5px;">
             💌 ${escapeHtml(partnerName)} 콕 찌르기
@@ -2073,7 +2062,7 @@
     try {
       const blob = await (await fetch(dataUrl)).blob();
       const photoId = id || newPhotoId();
-      const res = await fetch("/api/photo?id=" + encodeURIComponent(photoId), {
+      const res = await window.coupleFetch("/api/photo?id=" + encodeURIComponent(photoId), {
         method: "POST",
         headers: { "Content-Type": "application/octet-stream" },
         body: blob
@@ -2241,14 +2230,25 @@
 
   // Global Event Delegation
   document.addEventListener("click", function (e) {
-    const roleBtn = e.target.closest("[data-role]");
-    if (roleBtn) {
-      currentRole = roleBtn.getAttribute("data-role");
-      localStorage.setItem(ROLE_KEY, currentRole);
-      renderAll();
+    const avatarEdit = e.target.closest('[data-avatar-edit]');
+    if (avatarEdit) {
+      if (avatarEdit.getAttribute('data-avatar-edit') === currentRole) avatarEdit.closest('.avatar-picker').querySelector('input').click();
       return;
     }
-
+    const avatarView = e.target.closest('[data-avatar-view]');
+    if (avatarView) {
+      const role = avatarView.getAttribute('data-avatar-view');
+      if (!['husband', 'wife'].includes(role)) return;
+      document.getElementById('profilePhotoTitle').textContent = roleLabel(role) + '의 프로필 사진';
+      document.getElementById('profilePhotoContent').innerHTML = avatarHtml(role, 400);
+      document.getElementById('profilePhotoDialog').showModal();
+      return;
+    }
+    const photoDialog = document.getElementById('profilePhotoDialog');
+    if (e.target.closest('#closeProfilePhoto') || e.target === photoDialog) {
+      photoDialog.close();
+      return;
+    }
     if (e.target.closest("#memMyLocBtn")) {
       useMyLocationForDraft();
       return;
@@ -2655,11 +2655,12 @@
       const role = avatarInput.getAttribute("data-avatar-input");
       const file = avatarInput.files && avatarInput.files[0];
       avatarInput.value = "";
-      if (!file || (role !== "husband" && role !== "wife")) return;
+      if (!file || role !== currentRole || (role !== "husband" && role !== "wife")) return;
       const dataUrl = await compressAvatarFile(file);
-      if (!dataUrl) return;
+      if (!dataUrl || role !== currentRole) return;
       // 바꿀 때마다 새 id → 예전 사진이 캐시에 남아 보이는 일 없음
       const url = (await uploadPhotoDataUrl(dataUrl, "avatar-" + role + "-" + Date.now().toString(36))) || dataUrl;
+      if (role !== currentRole) return;
       state.couple[role + "Photo"] = url;
       saveState();
       return;
@@ -2723,8 +2724,8 @@
     if (e.target.id === "coupleConfigForm") {
       e.preventDefault();
       const fd = new FormData(e.target);
-      state.couple.husbandName = String(fd.get("husbandName") || "남편").trim();
-      state.couple.wifeName = String(fd.get("wifeName") || "아내").trim();
+      const nameKey = currentRole + "Name";
+      state.couple[nameKey] = String(fd.get(nameKey) || "").trim() || (currentRole === "husband" ? "남편" : "아내");
       state.couple.anniversaryTitle = String(fd.get("anniversaryTitle") || "결혼기념일").trim();
       state.couple.startDate = String(fd.get("startDate") || "2021-05-22");
       showCoupleSettings = false;
@@ -2924,10 +2925,6 @@
   const savedTheme = localStorage.getItem(THEME_KEY);
   if (savedTheme === "dark") {
     document.documentElement.setAttribute("data-theme", "dark");
-  }
-
-  if ("serviceWorker" in navigator && location.protocol !== "file:") {
-    navigator.serviceWorker.register("./sw.js").catch(function () {});
   }
 
   renderAll();

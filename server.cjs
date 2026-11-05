@@ -1,196 +1,39 @@
-/**
- * 우리 둘만의 집 (Couple App MVP) — 로컬/집 Wi-Fi 실시간 동기화 서버
- * 외부 패키지(npm install) 없이 Node.js 기본 모듈만으로 동작합니다.
- *
- * 실행 방법:
- *   node server.cjs
- */
-
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-
-const PORT = Number(process.env.PORT || 4173);
-const ROOT_DIR = __dirname;
-const DATA_DIR = path.join(ROOT_DIR, "data");
-const STATE_FILE = path.join(DATA_DIR, "couple-state.json");
-const PHOTO_DIR = path.join(DATA_DIR, "photos");
-
-const MIME_TYPES = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "application/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".webmanifest": "application/manifest+json; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".ico": "image/x-icon"
+﻿/** Local server uses the same authenticated API handlers as production. */
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const handlers = { '/api/auth': require('./api/auth'), '/api/pair': require('./api/pair'), '/api/state': require('./api/state'), '/api/photo': require('./api/photo') };
+const assets = {
+  '/': ['index.html', 'text/html'], '/index.html': ['index.html', 'text/html'],
+  '/app.js': ['app.js', 'application/javascript'], '/auth.js': ['auth.js', 'application/javascript'],
+  '/sw.js': ['sw.js', 'application/javascript'], '/styles.css': ['styles.css', 'text/css'],
+  '/icon.svg': ['icon.svg', 'image/svg+xml'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json']
 };
-
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function readStoredState() {
+const server = http.createServer(async (req, res) => {
   try {
-    if (!fs.existsSync(STATE_FILE)) return null;
-    return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
-  } catch (_) {
-    return null;
-  }
-}
-
-function writeStoredState(data) {
-  ensureDataDir();
-  fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), "utf8");
-}
-
-const sseClients = new Set();
-
-function broadcastState(stateObj) {
-  const payload = `data: ${JSON.stringify(stateObj)}\n\n`;
-  for (const res of sseClients) {
-    try {
-      res.write(payload);
-    } catch (_) {
-      sseClients.delete(res);
-    }
-  }
-}
-
-function getLocalLanIp() {
-  const nets = os.networkInterfaces();
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name] || []) {
-      if (net.family === "IPv4" && !net.internal) {
-        return net.address;
+    const pathname = new URL(req.url, 'http://localhost').pathname;
+    const handler = handlers[pathname];
+    if (handler) {
+      if (req.method === 'POST' && pathname !== '/api/photo') {
+        let size = 0;
+        const chunks = [];
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > 4 * 1024 * 1024) { res.writeHead(413); res.end(); return; }
+          chunks.push(chunk);
+        }
+        try { req.body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); }
+        catch (_) { res.writeHead(400); res.end(); return; }
       }
-    }
-  }
-  return "localhost";
-}
-
-const server = http.createServer(function (req, res) {
-  const parsedUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-  const pathname = parsedUrl.pathname;
-
-  // 1) SSE 실시간 스트림 (/api/stream)
-  if (req.method === "GET" && pathname === "/api/stream") {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive"
-    });
-    res.write(": connected\n\n");
-    sseClients.add(res);
-    req.on("close", function () {
-      sseClients.delete(res);
-    });
-    return;
-  }
-
-  // 2) 상태 조회 (/api/state)
-  if (req.method === "GET" && pathname === "/api/state") {
-    const current = readStoredState() || {};
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify(current));
-    return;
-  }
-
-  // 3) 상태 저장 및 실시간 브로드캐스트 (/api/state)
-  if (req.method === "POST" && pathname === "/api/state") {
-    let body = "";
-    req.on("data", function (chunk) {
-      body += chunk;
-      if (body.length > 8 * 1024 * 1024) {
-        req.destroy();
-      }
-    });
-    req.on("end", function () {
-      try {
-        const parsed = JSON.parse(body);
-        writeStoredState(parsed);
-        broadcastState(parsed);
-        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (err) {
-        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: false, error: err.message }));
-      }
-    });
-    return;
-  }
-
-  // 4) 추억 사진 저장/조회 (/api/photo?id=...) — data/photos/<id>.jpg
-  if (pathname === "/api/photo") {
-    const id = String(parsedUrl.searchParams.get("id") || "");
-    if (!/^[a-zA-Z0-9_-]{4,80}$/.test(id)) {
-      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ ok: false, error: "invalid id" }));
+      await handler(req, res);
       return;
     }
-    const photoPath = path.join(PHOTO_DIR, id + ".jpg");
-
-    if (req.method === "GET") {
-      if (!fs.existsSync(photoPath)) {
-        res.writeHead(404);
-        res.end();
-        return;
-      }
-      res.writeHead(200, {
-        "Content-Type": "image/jpeg",
-        "Cache-Control": "public, max-age=31536000, immutable"
-      });
-      fs.createReadStream(photoPath).pipe(res);
-      return;
-    }
-
-    if (req.method === "POST") {
-      const chunks = [];
-      let size = 0;
-      req.on("data", function (chunk) {
-        size += chunk.length;
-        if (size > 8 * 1024 * 1024) req.destroy();
-        else chunks.push(chunk);
-      });
-      req.on("end", function () {
-        fs.mkdirSync(PHOTO_DIR, { recursive: true });
-        fs.writeFileSync(photoPath, Buffer.concat(chunks));
-        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        res.end(JSON.stringify({ ok: true, url: `/api/photo?id=${id}` }));
-      });
-      return;
-    }
-  }
-
-  // 5) 정적 파일 서빙
-  let relPath = pathname === "/" ? "/index.html" : pathname;
-  relPath = path.normalize(relPath).replace(/^(\.\.[/\\])+/, "");
-  const filePath = path.join(ROOT_DIR, relPath);
-
-  if (!filePath.startsWith(ROOT_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Not Found");
-    return;
-  }
-
-  const ext = path.extname(filePath).toLowerCase();
-  const contentType = MIME_TYPES[ext] || "application/octet-stream";
-  res.writeHead(200, { "Content-Type": contentType });
-  fs.createReadStream(filePath).pipe(res);
+    const asset = assets[pathname];
+    if (!asset || !['GET', 'HEAD'].includes(req.method)) { res.writeHead(404); res.end('Not Found'); return; }
+    res.writeHead(200, { 'Content-Type': asset[1] + '; charset=utf-8', 'Cache-Control': 'no-cache' });
+    if (req.method === 'HEAD') res.end();
+    else fs.createReadStream(path.join(__dirname, asset[0])).pipe(res);
+  } catch (_) { if (!res.headersSent) res.writeHead(500); res.end('Server error'); }
 });
-
-server.listen(PORT, "0.0.0.0", function () {
-  const lanIp = getLocalLanIp();
-  console.log("====================================================");
-  console.log(" 🏡 우리 둘만의 집 (부부 전용 웹앱 MVP) 서버 실행됨!");
-  console.log(` ▶ PC에서 열기        : http://localhost:${PORT}`);
-  console.log(` ▶ 스마트폰(집 Wi-Fi) : http://${lanIp}:${PORT}`);
-  console.log("====================================================");
-});
-
+if (require.main === module) server.listen(Number(process.env.PORT || 4173), '0.0.0.0', () => console.log('Couple app: http://localhost:' + (process.env.PORT || 4173)));
+module.exports = server;
